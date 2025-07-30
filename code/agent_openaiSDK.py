@@ -30,13 +30,17 @@ from textwrap import indent
 import requests
 import argparse
 import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+from openai.types.chat.chat_completion import ChatCompletion
+
+# 加载环境变量
+load_dotenv()
 
 # --- CONFIGURATION ---
-# The model to use. "gemini-1.5-flash" is fast and capable.
-#MODEL_NAME = "gemini-1.5-flash-latest" 
-MODEL_NAME = "gemini-2.5-pro" 
-# Use the Generative Language API endpoint, which is simpler for API key auth
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
+# 从环境变量中获取配置
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-pro")
+API_URL = os.getenv("API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 
 # Global variables for logging
 _log_file = None
@@ -184,14 +188,13 @@ Your task is to act as an IMO grader. Now, generate the **summary** and the **st
 
 def get_api_key():
     """
-    Retrieves the Google API key from environment variables.
+    Retrieves the API key from environment variables.
     Exits if the key is not found.
     """
-
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("Error: GOOGLE_API_KEY environment variable not set.")
-        print("Please set the variable, e.g., 'export GOOGLE_API_KEY=\"your_api_key\"'")
+        print("Error: OPENAI_API_KEY environment variable not set.")
+        print("Please set the variable in your .env file or environment")
         sys.exit(1)
     return api_key
 
@@ -215,74 +218,69 @@ def build_request_payload(system_prompt, question_prompt, other_prompts=None):
     Builds the JSON payload for the Gemini API request, using the
     recommended multi-turn format to include a system prompt.
     """
-    payload = {
-        "systemInstruction": {
-            "role": "system",
-            "parts": [
-            {
-                "text": system_prompt 
-            }
-            ]
-        },
-       "contents": [
-        {
-          "role": "user",
-          "parts": [{"text": question_prompt}]
-        }
-      ],
-      "generationConfig": {
-        "temperature": 0.1,
-        "topP": 1.0,
-        "thinkingConfig": { "thinkingBudget": 32768} 
-      },
-    }
-
+    messages = []
+    
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": question_prompt})
+    
     if other_prompts:
         for prompt in other_prompts:
-            payload["contents"].append({
-                "role": "user",
-                "parts": [{"text": prompt}]
-            })
-
-    return payload
-
-def send_api_request(api_key, payload):
-    """
-    Sends the request to the Gemini API and returns the response.
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "X-goog-api-key": api_key # API key now in header!
-    }
+            messages.append({"role": "user", "content": prompt})
     
-    #print("Sending request to Gemini API...")
+    return messages
+
+def send_api_request(api_key, messages):
+    """
+    Sends the request to the OPENAI Compatible API and returns the response.
+    """
     try:
-        response = requests.post(API_URL, headers=headers, data=json.dumps(payload))
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
-        return response.json()
-    except requests.exceptions.RequestException as e:
+        client = OpenAI(
+            api_key=api_key,
+            base_url=API_URL
+        )
+        
+        extra_args = {}
+        if "gemini" in MODEL_NAME.lower():
+            extra_args = {
+                "extra_body": {
+                    "google": {
+                        "thinking_config": {
+                            "thinking_budget": 32768,
+                            "include_thoughts": False
+                        }
+                    }
+                }
+            }
+        
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            temperature=0.1,
+            top_p=1.0,
+            extra_body=extra_args
+        )
+        
+        return response
+    except Exception as e:
         print(f"Error during API request: {e}")
-        if response.status_code == 400:
-            print(f"Possible reason for 400: Model '{MODEL_NAME}' might not be available or URL is incorrect for your setup.")
-            print(f"Raw API Response (if available): {response.text}")
         sys.exit(1)
 
-def extract_text_from_response(response_data):
+def extract_text_from_response(response: ChatCompletion):
     """
     Extracts the generated text from the API response JSON.
     Handles potential errors if the response format is unexpected.
     """
     try:
-        return response_data['candidates'][0]['content']['parts'][0]['text']
-    except (KeyError, IndexError, TypeError) as e:
+        return response.choices[0].message.content
+    except (AttributeError, IndexError) as e:
         print("Error: Could not extract text from the API response.")
         print(f"Reason: {e}")
         print("Full API Response:")
-        print(json.dumps(response_data, indent=2))
-        #sys.exit(1)
-        raise e 
+        print(response)
+        raise e
 
-def extract_detailed_solution(solution, marker='Detailed Solution', after=True):
+def extract_detailed_solution(solution: str, marker: str = 'Detailed Solution', after: bool = True) -> str:
     """
     Extracts the text after '### Detailed Solution ###' from the solution string.
     Returns the substring after the marker, stripped of leading/trailing whitespace.
@@ -315,15 +313,16 @@ def verify_solution(problem_statement, solution, verbose=True):
 """
     if(verbose):
         print(">>>>>>> Start verification.")
-    p2 = build_request_payload(system_prompt=verification_system_prompt, 
+    messages = build_request_payload(
+        system_prompt=verification_system_prompt, 
         question_prompt=newst
-        )
+    )
     
     if(verbose):
         print(">>>>>>> Verification prompt:")
-        print(json.dumps(p2, indent=4))
+        print(json.dumps(messages, indent=4))
 
-    res = send_api_request(get_api_key(), p2)
+    res = send_api_request(get_api_key(), messages)
     out = extract_text_from_response(res) 
 
     if(verbose):
@@ -332,8 +331,8 @@ def verify_solution(problem_statement, solution, verbose=True):
 
     check_correctness = """Response in "yes" or "no". Is the following statement saying the solution is correct, or does not contain critical error or a major justification gap?""" \
             + "\n\n" + out 
-    prompt = build_request_payload(system_prompt="", question_prompt=check_correctness)
-    r = send_api_request(get_api_key(), prompt)
+    check_messages = build_request_payload(system_prompt="", question_prompt=check_correctness)
+    r = send_api_request(get_api_key(), check_messages)
     o = extract_text_from_response(r) 
 
     if(verbose):
@@ -363,8 +362,8 @@ Is the following text claiming that the solution is complete?
 Response in exactly "yes" or "no". No other words.
     """
 
-    p1 = build_request_payload(system_prompt="",    question_prompt=check_complete_prompt)
-    r = send_api_request(get_api_key(), p1)
+    messages = build_request_payload(system_prompt="", question_prompt=check_complete_prompt)
+    r = send_api_request(get_api_key(), messages)
     o = extract_text_from_response(r)
 
     print(o)
@@ -372,7 +371,7 @@ Response in exactly "yes" or "no". No other words.
 
 
 def init_explorations(problem_statement, verbose=True, other_prompts=[]):
-    p1  = build_request_payload(
+    messages = build_request_payload(
             system_prompt=step1_prompt,
             question_prompt=problem_statement,
             #other_prompts=["* Please explore all methods for solving the problem, including casework, induction, contradiction, and analytic geometry, if applicable."]
@@ -381,27 +380,20 @@ def init_explorations(problem_statement, verbose=True, other_prompts=[]):
         )
 
     print(f">>>>>> Initial prompt.")
-    print(json.dumps(p1, indent=4))
+    print(json.dumps(messages, indent=4))
 
-    response1 = send_api_request(get_api_key(), p1)
+    response1 = send_api_request(get_api_key(), messages)
     output1 = extract_text_from_response(response1)
 
     print(f">>>>>>> First solution: ") 
     print(json.dumps(output1, indent=4))
 
     print(f">>>>>>> Self improvement start:")
-    p1["contents"].append(
-        {"role": "model",
-        "parts": [{"text": output1}]
-        }
-    )
-    p1["contents"].append(
-        {"role": "user",
-        "parts": [{"text": self_improvement_prompt}]
-        }
-    )
+    improvement_messages = messages.copy()
+    improvement_messages.append({"role": "assistant", "content": output1})
+    improvement_messages.append({"role": "user", "content": self_improvement_prompt})
 
-    response2 = send_api_request(get_api_key(), p1)
+    response2 = send_api_request(get_api_key(), improvement_messages)
     solution = extract_text_from_response(response2)
     print(f">>>>>>> Corrected solution: ")
     print(json.dumps(solution, indent=4))
@@ -419,10 +411,10 @@ def init_explorations(problem_statement, verbose=True, other_prompts=[]):
     print(json.dumps(verify, indent=4))
     print(f">>>>>>> verify results: {good_verify}")
     
-    return p1, solution, verify, good_verify
+    return messages, solution, verify, good_verify
 
 def agent(problem_statement, other_prompts=[]):
-    p1, solution, verify, good_verify = init_explorations(problem_statement, True, other_prompts)
+    messages, solution, verify, good_verify = init_explorations(problem_statement, True, other_prompts)
 
     if(solution is None):
         print(">>>>>>> Failed in finding a complete solution.")
@@ -443,29 +435,20 @@ def agent(problem_statement, other_prompts=[]):
             print(">>>>>>> Verification does not pass, correcting ...")
             # establish a new prompt that contains the solution and the verification
 
-            p1 = build_request_payload(
+            correction_messages = build_request_payload(
                 system_prompt=step1_prompt,
                 question_prompt=problem_statement,
                 #other_prompts=["You may use analytic geometry to solve the problem."]
                 other_prompts=other_prompts
             )
-
-            p1["contents"].append(
-                {"role": "model",
-                "parts": [{"text": solution}]
-                }
-            )
             
-            p1["contents"].append(
-                {"role": "user",
-                "parts": [{"text": correction_prompt},
-                          {"text": verify}]
-                }
-            )
+            correction_messages.append({"role": "assistant", "content": solution})
+            
+            correction_messages.append({"role": "user", "content": correction_prompt + "\n\n" + verify})
 
             print(">>>>>>> New prompt:")
-            print(json.dumps(p1, indent=4))
-            response2 = send_api_request(get_api_key(), p1)
+            print(json.dumps(correction_messages, indent=4))
+            response2 = send_api_request(get_api_key(), correction_messages)
             solution = extract_text_from_response(response2)
 
             print(">>>>>>> Corrected solution:")
@@ -503,7 +486,7 @@ def agent(problem_statement, other_prompts=[]):
 if __name__ == "__main__":
     # Set up argument parsing
     parser = argparse.ArgumentParser(description='IMO Problem Solver Agent')
-    parser.add_argument('problem_file', nargs='?', default='problem_statement.txt', 
+    parser.add_argument('problem_file', nargs='?', default='problems/imo01.txt', 
                        help='Path to the problem statement file (default: problem_statement.txt)')
     parser.add_argument('--log', '-l', type=str, help='Path to log file (optional)')
     parser.add_argument('--other_prompts', '-o', type=str, help='Other prompts (optional)')
