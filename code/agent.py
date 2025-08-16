@@ -30,17 +30,37 @@ from textwrap import indent
 import requests
 import argparse
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
 
 # --- CONFIGURATION ---
-# The model to use. "gemini-1.5-flash" is fast and capable.
-#MODEL_NAME = "gemini-1.5-flash-latest" 
-MODEL_NAME = "gemini-2.5-pro" 
-# Use the Generative Language API endpoint, which is simpler for API key auth
+# Load environment variables from .env file
+load_dotenv()
+
+# The model to use - defaults to gemini-2.5-pro
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-pro")
+# Use the Generative Language API endpoint
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
 
 # Global variables for logging
 _log_file = None
 original_print = print
+
+# Directory containing prompt templates
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+def load_prompt(filename):
+    """Load a prompt template from the prompts directory."""
+    prompt_path = PROMPTS_DIR / filename
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Error: Prompt file not found at '{prompt_path}'")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading prompt file '{prompt_path}': {e}")
+        sys.exit(1)
 
 def log_print(*args, **kwargs):
     """
@@ -78,7 +98,15 @@ def close_log_file():
         _log_file.close()
         _log_file = None
 
-step1_prompt = """
+# Load prompts from external files
+step1_prompt = load_prompt("step1_prompt.txt")
+self_improvement_prompt = load_prompt("self_improvement_prompt.txt")
+correction_prompt = load_prompt("correction_prompt.txt")
+verification_system_prompt = load_prompt("verification_system_prompt.txt")
+verification_reminder = load_prompt("verification_reminder.txt")
+
+# Keeping old hardcoded prompts commented for reference
+_step1_prompt_old = """
 ### Core Instructions ###
 
 *   **Rigor is Paramount:** Your primary goal is to produce a complete and rigorously justified solution. Every step in your solution must be logically sound and clearly explained. A correct final answer derived from flawed or incomplete reasoning is considered a failure.
@@ -115,15 +143,15 @@ Before finalizing your output, carefully review your "Method Sketch" and "Detail
 
 """
 
-self_improvement_prompt = """
+_self_improvement_prompt_old = """
 You have an opportunity to improve your solution. Please review your solution carefully. Correct errors and fill justification gaps if any. Your second round of output should strictly follow the instructions in the system prompt.
 """
 
-correction_prompt = """
+_correction_prompt_old = """
 Below is the bug report. If you agree with certain item in it, can you improve your solution so that it is complete and rigorous? Note that the evaluator who generates the bug report can misunderstand your solution and thus make mistakes. If you do not agree with certain item in the bug report, please add some detailed explanations to avoid such misunderstanding. Your new solution should strictly follow the instructions in the system prompt.
 """
 
-verification_system_prompt = """
+_verification_system_prompt_old = """
 You are an expert mathematician and a meticulous grader for an International Mathematical Olympiad (IMO) level exam. Your primary task is to rigorously verify the provided mathematical solution. A solution is to be judged correct **only if every step is rigorously justified.** A solution that arrives at a correct final answer through flawed reasoning, educated guesses, or with gaps in its arguments must be flagged as incorrect or incomplete.
 
 ### Instructions ###
@@ -176,7 +204,7 @@ Your response MUST be structured into two main sections: a **Summary** followed 
 """
 
 
-verification_remider = """
+_verification_reminder_old = """
 ### Verification Task Reminder ###
 
 Your task is to act as an IMO grader. Now, generate the **summary** and the **step-by-step verification log** for the solution above. In your log, justify each correct step and explain in detail any errors or justification gaps you find, as specified in the instructions above.
@@ -184,14 +212,16 @@ Your task is to act as an IMO grader. Now, generate the **summary** and the **st
 
 def get_api_key():
     """
-    Retrieves the Google API key from environment variables.
+    Retrieves the Gemini API key from environment variables.
     Exits if the key is not found.
     """
-
-    api_key = os.getenv("GOOGLE_API_KEY")
+    # Try GEMINI_API_KEY first, then fall back to GOOGLE_API_KEY for backwards compatibility
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        print("Error: GOOGLE_API_KEY environment variable not set.")
-        print("Please set the variable, e.g., 'export GOOGLE_API_KEY=\"your_api_key\"'")
+        print("Error: GEMINI_API_KEY environment variable not set.")
+        print("Please set the variable in your .env file or export it:")
+        print('export GEMINI_API_KEY="your_api_key"')
+        print("\nGet your API key from: https://ai.google.dev/gemini-api/docs/models#gemini-2.5-pro")
         sys.exit(1)
     return api_key
 
@@ -233,7 +263,7 @@ def build_request_payload(system_prompt, question_prompt, other_prompts=None):
       "generationConfig": {
         "temperature": 0.1,
         "topP": 1.0,
-        "thinkingConfig": { "thinkingBudget": 32768} 
+        "thinkingConfig": { "thinkingBudget": 32768}
       },
     }
 
@@ -300,19 +330,13 @@ def verify_solution(problem_statement, solution, verbose=True):
 
     dsol = extract_detailed_solution(solution)
 
-    newst = f"""
-======================================================================
-### Problem ###
-
-{problem_statement}
-
-======================================================================
-### Solution ###
-
-{dsol}
-
-{verification_remider}
-"""
+    # Load and format the verification template
+    verification_template = load_prompt("verification_template.txt")
+    newst = verification_template.format(
+        problem_statement=problem_statement,
+        detailed_solution=dsol,
+        verification_reminder=verification_reminder
+    )
     if(verbose):
         print(">>>>>>> Start verification.")
     p2 = build_request_payload(system_prompt=verification_system_prompt, 
@@ -330,8 +354,9 @@ def verify_solution(problem_statement, solution, verbose=True):
         print(">>>>>>> Verification results:")
         print(json.dumps(out, indent=4))
 
-    check_correctness = """Response in "yes" or "no". Is the following statement saying the solution is correct, or does not contain critical error or a major justification gap?""" \
-            + "\n\n" + out 
+    # Load and format the check correctness template
+    check_correctness_template = load_prompt("check_correctness_template.txt")
+    check_correctness = check_correctness_template.format(verification_output=out) 
     prompt = build_request_payload(system_prompt="", question_prompt=check_correctness)
     r = send_api_request(get_api_key(), prompt)
     o = extract_text_from_response(r) 
@@ -352,16 +377,9 @@ def verify_solution(problem_statement, solution, verbose=True):
     return bug_report, o
 
 def check_if_solution_claimed_complete(solution):
-    check_complete_prompt = f"""
-Is the following text claiming that the solution is complete?
-==========================================================
-
-{solution}
-
-==========================================================
-
-Response in exactly "yes" or "no". No other words.
-    """
+    # Load and format the check complete template
+    check_complete_template = load_prompt("check_complete_template.txt")
+    check_complete_prompt = check_complete_template.format(solution=solution)
 
     p1 = build_request_payload(system_prompt="",    question_prompt=check_complete_prompt)
     r = send_api_request(get_api_key(), p1)

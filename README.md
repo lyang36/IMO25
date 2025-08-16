@@ -34,41 +34,69 @@ This project consists of the following components:
 
 ## Prerequisites
 
-1. **Python 3.7+** installed on your system
-2. **Google Gemini API key** - Get one from [Google AI Studio](https://aistudio.google.com/app/apikey)
+1. **Python 3.10+** installed on your system (tested with Python 3.11)
+2. **Google Gemini API key** - Get one from [Google AI Studio](https://ai.google.dev/gemini-api/docs/models#gemini-2.5-pro)
 3. **Required Python packages**:
    ```bash
-   pip install requests
+   pip install requests python-dotenv
    ```
 
 ## Setup
 
 1. **Clone or download the project files**
 2. **Set up your API key**:
-   - Create a `.env` file in the project directory
-   - Add your API key: `GOOGLE_API_KEY=your_api_key_here`
-   - Or set it as an environment variable: `export GOOGLE_API_KEY=your_api_key_here`
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   # Edit .env and add your Gemini API key
+   # GEMINI_API_KEY=your_api_key_here
+   ```
+   - The system also supports `GOOGLE_API_KEY` for backwards compatibility
+3. **Optional: Use direnv for automatic environment loading**:
+   - The project includes a `.envrc` file for direnv users
+   - Run `direnv allow` to automatically load environment variables
 
 ## Usage
 
-### Single Agent (`agent.py`)
+### Quick Start with Make
+
+```bash
+# Set up environment and create .env file
+make env
+
+# Run agent on the first IMO problem
+make run-imo01
+
+# Run agent on a specific problem
+make run-agent PROBLEM=problems/imo02.txt
+```
+
+### Single Agent (`code/agent.py`)
 
 Run a single agent to solve an IMO problem:
 
 ```bash
-python agent.py problem.txt [options]
+python code/agent.py problems/imo01.txt [options]
 ```
 
 **Arguments:**
-- `problem.txt`: Path to the problem statement file (required); imo2025 problems are in `problems`
+- `problem_file`: Path to the problem statement file (required)
 
 **Options:**
-- `--log LOG_FILE`: Specify a log file for output (default: prints to console)
-- `--other_prompts PROMPTS`: Additional prompts separated by commas
+- `--log LOG_FILE` or `-l`: Specify a log file for output (default: prints to console)
+- `--other_prompts PROMPTS` or `-o`: Additional prompts separated by commas
+- `--max_runs N` or `-m`: Maximum number of runs (default: 10)
 
-**Example:**
+**Examples:**
 ```bash
-python agent.py imo2025_p1.txt --log agent_output.log
+# Run agent on problem 1 with single attempt
+python code/agent.py problems/imo01.txt --max_runs 1
+
+# Run with logging
+python code/agent.py problems/imo01.txt --log output.log
+
+# Run with additional prompts
+python code/agent.py problems/imo01.txt -o "use analytic geometry,consider edge cases"
 ```
 
 ### Parallel Execution (`code/run_parallel.py`)
@@ -76,11 +104,11 @@ python agent.py imo2025_p1.txt --log agent_output.log
 Run multiple agents in parallel to increase the chance of finding a solution:
 
 ```bash
-python IMO25/code/run_parallel.py <problem_file> [options]
+python code/run_parallel.py problems/imo01.txt [options]
 ```
 
 **Arguments:**
-- `problem.txt`: Path to the problem statement file (required). Use an absolute path or ensure the path is valid from within `IMO25/code/` (the script runs the agent with its working directory set to `IMO25/code/`).
+- `problem_file`: Path to the problem statement file (required)
 
 **Options:**
 - `--num-agents N` or `-n N`: Number of parallel agents (default: 10)
@@ -94,30 +122,53 @@ python IMO25/code/run_parallel.py <problem_file> [options]
 **Examples:**
 ```bash
 # Run 20 agents with 5-minute timeout each
-python IMO25/code/run_parallel.py problems/imo2025_p1.txt -n 20 -t 300
+python code/run_parallel.py problems/imo01.txt -n 20 -t 300
 
 # Run 5 agents with custom log directory and exit immediately on first success
-python IMO25/code/run_parallel.py problems/imo2025_p1.txt -n 5 -d logs/p1_run -e
+python code/run_parallel.py problems/imo01.txt -n 5 -d logs/p1_run -e
 
-# Run with additional prompts and a custom agent file
-python IMO25/code/run_parallel.py problems/imo2025_p1.txt -n 15 -o "focus_on_geometry,use_induction" -a agent.py
+# Run with additional prompts
+python code/run_parallel.py problems/imo01.txt -n 15 -o "focus_on_geometry,use_induction"
 ```
 
-### Result extractor (`code/res2md.py`)
+### Result Extractor (`code/res2md.py`)
 
 Parse a result file that contains JSON (for example, a `.jsonl` file where each line is a JSON object), and print the last JSON object in the file. Useful for quickly extracting the final structured result produced by some runs.
 
 ```bash
-python IMO25/code/res2md.py <result_file>
+python code/res2md.py <result_file>
 ```
 
 **Example:**
 ```bash
-python IMO25/code/res2md.py logs/results.jsonl
+python code/res2md.py logs/results.jsonl
 ```
 
 ## Problem File Format
-See the `problems` folder.
+
+Problem files should be plain text files containing the problem statement. See the `problems/` folder for IMO 2025 problems (imo01.txt through imo06.txt).
+
+## Project Structure
+
+```
+IMO25-solution/
+├── code/
+│   ├── agent.py           # Main agent implementation
+│   ├── run_parallel.py    # Parallel execution script
+│   └── res2md.py          # Result extraction utility
+├── prompts/               # Extracted prompt templates
+│   ├── step1_prompt.txt
+│   ├── verification_system_prompt.txt
+│   └── ...
+├── problems/              # IMO 2025 problems
+│   ├── imo01.txt
+│   ├── imo02.txt
+│   └── ...
+├── .env.example           # Example environment configuration
+├── .envrc                 # Direnv configuration
+├── Makefile              # Build and run targets
+└── README.md             # This file
+```
 
 ## Output and Logging
 
@@ -143,9 +194,13 @@ The system looks for the phrase "Found a correct solution in run" to identify su
 
 ### Agent Behavior
 - Agents use Google's Gemini 2.5 Pro model
-- Each agent follows a structured approach with multiple attempts
+- Each agent follows a structured approach with:
+  - Initial solution generation
+  - Self-improvement step
+  - Verification and correction loop (up to 30 iterations)
 - Solutions are verified for completeness and correctness
 - Agents can provide partial solutions if complete solutions aren't found
+- The system requires 5 consecutive successful verifications before accepting a solution
 
 ## Tips for Best Results
 
@@ -159,9 +214,18 @@ The system looks for the phrase "Found a correct solution in run" to identify su
 
 ### Common Issues
 
-1. **API Key Error**: Ensure your Google API key is properly set
-2. **Timeout Issues**: Increase timeout or reduce number of agents
+1. **API Key Error**: 
+   - Ensure your `GEMINI_API_KEY` is properly set in `.env`
+   - Verify the key starts with "AIza" using: `echo $GEMINI_API_KEY | cut -c 1-4`
+   - Get a valid key from: https://ai.google.dev/gemini-api/docs/models#gemini-2.5-pro
+
+2. **Timeout Issues**: 
+   - The thinking budget feature may cause long response times
+   - Increase timeout or reduce number of agents
+   - Consider running with `--max_runs 1` for testing
+
 3. **Memory Issues**: Reduce max-workers if running out of memory
+
 4. **No Solutions Found**: Try running more agents or check problem clarity
 
 ### Debug Mode

@@ -1,0 +1,8 @@
+Is the following text claiming that the solution is complete?
+==========================================================
+
+{solution}
+
+==========================================================
+
+Response in exactly "yes" or "no". No other words.

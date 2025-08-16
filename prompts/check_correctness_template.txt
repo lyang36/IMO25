@@ -1,0 +1,3 @@
+Response in "yes" or "no". Is the following statement saying the solution is correct, or does not contain critical error or a major justification gap?
+
+{verification_output}
