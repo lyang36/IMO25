@@ -33,7 +33,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # --- CONFIGURATION ---
-MODEL_PATH = "/home/st/common_dataset/LLM/llm_weights/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a"
+model_id = "openai/gpt-oss-120b"
 
 # Global variables for logging
 _log_file = None
@@ -97,7 +97,7 @@ def load_gpt_oss_model():
             _model = AutoModelForCausalLM.from_pretrained(
                 MODEL_PATH,
                 torch_dtype="auto",
-                device_map="cuda:1",
+                device_map="cuda:0",
             )
             print("GPT OSS model loaded successfully.")
         except Exception as e:
