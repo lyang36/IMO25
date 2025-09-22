@@ -1,0 +1,5 @@
+*** Problem Statement ***
+
+Consider a $2025\times2025$ grid of unit squares. Matilda wishes to place on the grid some rectangular tiles, possibly of difference sizes, such that each side of every tile lies on a grid line and every unit square is covered by at most one tile.
+
+Determine the minimum number of tiles Matilda needs to place so that each row and each column of the grid has exactly one unit square that is not covered by any tile.

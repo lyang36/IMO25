@@ -1,0 +1,5 @@
+*** Problem Statement ***
+
+Let $\mathbb N$ denote the set of positive integers. A function $f:\mathbb N\to\mathbb N$ is said to be bonza if $f(a)$ divides $b^a-f(b)^{f(a)}$ for all positive integers $a$ and $b$.
+
+Determine the smallest real constant $c$ such that $f(n)\le cn$ for all bonza functions $f$ and all positive integers $n$.

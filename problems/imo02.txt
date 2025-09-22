@@ -1,0 +1,7 @@
+*** Problem Statement ***
+
+Let $\Omega$ and $\Gamma$ be circles with centers $M$ and $N$, respectively, such that the radius of $\Omega$ is less than the radius of $\Gamma$. Suppose circles $\Omega$ and $\Gamma$ intersect at two distinct points $A$ and $B$. Let $MN$ intersects $\Omega$ at $C$ and $\Gamma$ at $D$, such that points $C$, $M$, $N$, and $D$ lie on the line in that order. Let $P$ be the circumcenter of triangle $ACD$. Line $AP$ intersects $\Omega$ again at $E\neq A$. Line $AP$ intersects $\Gamma$ again at $F\neq A$. Let $H$ be the orthocenter of triangle $PMN$.
+
+Prove that the line through $H$ parallel to $AP$ is tangent to the circumcircle of triangle $BEF$.
+
+(The orthocenter of a triangle is the point of intersection of its altitudes.)

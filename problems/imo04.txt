@@ -1,0 +1,7 @@
+*** Problem Statement ***
+
+A proper divisor of a positive integer $N$ is a positive divisor of $N$ other than $N$ itself.
+
+The infinite sequence $a_1,a_2,\ldots$ consists of positive integers, each of which has at least three proper divisors. For each $n\ge1$, the integer $a_{n+1}$ is the sum of three largest proper divisors of $a_n$.
+
+Determine all possible values of $a_1$.
